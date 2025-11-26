@@ -1,16 +1,19 @@
-import tkinter as tk
-import sys
+import FreeSimpleGUI as sg
 
-try:
-    # Tente de créer une fenêtre Tkinter minimale
-    root = tk.Tk()
-    root.title("Test Tkinter Réussi")
-    label = tk.Label(root, text="Tkinter fonctionne correctement dans ce Venv.")
-    label.pack()
-    print("✅ Tkinter a démarré la boucle de la GUI. La fenêtre devrait apparaître.")
-    root.mainloop() 
-except Exception as e:
-    # Si cette erreur se produit, Tkinter est manquant ou corrompu
-    print(f"❌ Échec du test Tkinter : {e}")
-    print("\nLe problème est que votre Venv n'a pas accès au support GUI (Tkinter).")
-    sys.exit(1)
+sg.theme('DarkAmber')   # Add a touch of color
+# All the stuff inside your window.
+layout = [  [sg.Text('Some text on Row 1')],
+            [sg.Text('Enter something on Row 2'), sg.InputText()],
+            [sg.Button('Ok'), sg.Button('Cancel')] ]
+
+# Create the Window
+window = sg.Window('Window Title', layout)
+sg.popup("Hello universe...I'm a 1-line GUI program!")
+# Event Loop to process "events" and get the "values" of the inputs
+while True:
+    event, values = window.read()
+    if event == sg.WIN_CLOSED or event == 'Cancel': # if user closes window or clicks cancel
+        break
+    print('You entered ', values[0])
+
+window.close()
