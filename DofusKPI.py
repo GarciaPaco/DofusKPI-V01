@@ -18,6 +18,17 @@ LOAD_WAIT_TIME = 10
 DOFUS_WINDOW_TITLE = "Dofus "
 CHARACTER_NAME = "Sunaldar"  # Remplacez par le nom de votre personnage
 
+# Dictionnaire imbriqué pour les destinations de voyage
+# Structure : Ville -> Destination -> Coordonnées
+TRAVEL_DESTINATIONS = {
+    'Bonta': {
+        'HDV Forgemagie': '34,-59'
+    },
+    'Brakmar': {
+        'HDV Forgemagie': '-26,38'
+    }
+}
+
 # --- VARIABLES GLOBALES ---
 last_position = None
 mouse_listener = None 
@@ -191,7 +202,33 @@ def wait_for_any_image(image_paths, timeout=30, confidence=0.8):
     print(f"❌ - Timeout : Impossible de trouver une des images après {timeout}s.")
     return None
 
-def write_with_random_interval(text, min_delay=0.12, max_delay=0.65):
+def wait_for_image_periodically(image_path, total_timeout=90, check_interval=4, search_duration=1, confidence=0.8):
+    """
+    Attend une image en la cherchant périodiquement.
+    Ex: Cherche pendant 1s, attend 4s, et répète pendant 90s max.
+    """
+    print(f"⏳ - Recherche périodique de '{image_path}' (max {total_timeout}s)...")
+    main_start_time = time.time()
+    while time.time() - main_start_time < total_timeout:
+        search_start_time = time.time()
+        found_in_attempt = False
+        # Boucle de recherche pendant `search_duration`
+        while time.time() - search_start_time < search_duration:
+            try:
+                if pyautogui.locateOnScreen(image_path, confidence=confidence):
+                    print(f"✅ - Image '{image_path}' trouvée !")
+                    return True
+            except pyautogui.PyAutoGUIException:
+                pass # On ignore et on réessaie
+            time.sleep(0.2) # Petite pause pour ne pas surcharger le CPU
+        
+        # Si non trouvée, on attend l'intervalle
+        print(f"... Non trouvé. Prochain essai dans {check_interval}s.")
+        time.sleep(check_interval)
+    print(f"❌ - Timeout : L'image '{image_path}' n'est pas apparue après {total_timeout}s.")
+    return False
+
+def write_with_random_interval(text, min_delay=0.4, max_delay=0.25):
     """
     Simule la frappe de texte avec un intervalle aléatoire entre chaque touche
     pour un comportement plus humain.
@@ -293,35 +330,106 @@ def script_logic(window, values):
             
             # On attend un peu pour être sûr que le jeu est prêt à recevoir des commandes
             print("... Pause pour s'assurer que le jeu est réactif ...")
-            time.sleep(2)
+            time.sleep(1)
 
         # --- POINT DE CONVERGENCE ---
         # Que le jeu vienne d'être lancé ou qu'il l'était déjà, on est maintenant en jeu.
         # On vérifie dans quelle cité on se trouve pour exécuter les bonnes commandes.
-
+        
+        # 0. Tentative de fermeture d'éventuels menus ouverts (sécurité)
+        print("\n🔎 - Tentative de fermeture de menus potentiellement ouverts (4 essais)...")
+        for i in range(4):
+            # On cherche pendant 0.8s. Si l'image est trouvée, on clique.
+            # Si elle n'est pas trouvée, la fonction continue sans erreur.
+            find_and_click_image('images/dofus_options_close.png', timeout=0.8, confidence=0.7)
+            time.sleep(0.3) # Pause entre chaque tentative
+            
         city_images = ['images/dofus_bonta.png', 'images/dofus_brakmar.png']
         found_city_image = wait_for_any_image(city_images, timeout=60, confidence=0.7)
 
-        if found_city_image == 'images/dofus_bonta.png':
-            print("✅ - Personnage localisé à Bonta. Passage en mode solo et voyage.")
-            time.sleep(0.5)
-            pyautogui.press('space')
-            write_with_random_interval('/solo')
-            pyautogui.press('enter')
-            print("✅ - Passage en mode solo.")
-            time.sleep(1)
-            write_with_random_interval('/travel 34,-59')
-            pyautogui.press('enter')
-        elif found_city_image == 'images/dofus_brakmar.png':
-            print("✅ - Personnage localisé à Brakmar. Passage en mode solo et voyage.")
-            time.sleep(2.5)
-            pyautogui.press('space')
-            write_with_random_interval('/solo')
-            pyautogui.press('enter')
-            print("✅ - Passage en mode solo.")
-            time.sleep(1) # Pause avant la commande de voyage
-            write_with_random_interval('/travel -26,38')
-            pyautogui.press('enter')
+        if found_city_image: # Si une des images de cité a été trouvée
+            city_name = "Bonta" if "bonta" in found_city_image else "Brakmar"
+            print(f"✅ - Personnage localisé à {city_name}. Lancement de la séquence de commandes.")
+            
+            # On récupère les coordonnées depuis notre NOUVEAU dictionnaire imbriqué
+            travel_coords = TRAVEL_DESTINATIONS[city_name]['HDV Forgemagie']
+            travel_command = f"/travel {travel_coords}"
+
+            # --- NOUVELLE SÉQUENCE : CHANGEMENT DE THÈME VIA LES MENUS ---
+            print("\n🤖 --- DÉBUT DE LA SÉQUENCE DE CHANGEMENT DE THÈME --- 🤖")
+            
+            # 1. Cliquer sur le bouton "Menu Principal"
+            if not find_and_click_image('images/dofus_esc_menu.png', timeout=5, confidence=0.8):
+                print("❌ - Échec : Impossible de trouver le bouton 'Menu Principal'.")
+                return
+
+            # 2. Cliquer sur le bouton "Options"
+            if not find_and_click_image('images/dofus_options.png', timeout=5, confidence=0.8):
+                print("❌ - Échec : Impossible de trouver le bouton 'Options'.")
+                return
+            
+            # 3. Cliquer sur l'onglet "Thèmes"
+            if not find_and_click_image('images/dofus_options_theme.png', timeout=5, confidence=0.8):
+                print("❌ - Échec : Impossible de trouver l'onglet 'Thèmes'.")
+                return
+
+            # 4. Cliquer sur le thème par défaut
+            if not find_and_click_image('images/dofus_option_theme_default.png', timeout=5, confidence=0.8):
+                print("❌ - Échec : Impossible de trouver le thème par défaut.")
+                return
+
+            # 5. Fermer la fenêtre des options
+            if not find_and_click_image('images/dofus_options_close.png', timeout=5, confidence=0.8):
+                print("❌ - Échec : Impossible de trouver le bouton pour fermer les options.")
+                return
+            
+            print("✅ - Séquence de changement de thème terminée.")
+            time.sleep(1) # Pause avant de continuer
+
+            # --- SÉQUENCE D'ÉCRITURE DES COMMANDES ---
+            print("\n🤖 --- DÉBUT DE LA SÉQUENCE DE COMMANDES CHAT --- 🤖")
+            # 6. Cliquer sur la barre de chat pour l'activer
+            if find_and_click_image('images/dofus_chat_notinfocus.png', timeout=5, confidence=0.8):
+                # 7. Attendre que le curseur de saisie apparaisse
+                if wait_for_image('images/dofus_chat_infocus.png', timeout=5, confidence=0.8):
+                    # 8. Écrire /solo
+                    write_with_random_interval('/solo')
+                    pyautogui.press('enter')
+                    time.sleep(0.5)
+                    # 9. Écrire la commande de voyage
+                    write_with_random_interval(travel_command)
+                    pyautogui.press('enter')
+                    # 10. Valider le voyage
+                    if not find_and_click_image('images/dofus_travel_ok.png', timeout=5, confidence=0.8):
+                        print("❌ - Échec : Impossible de valider le voyage.")
+                        return
+                    print("✅ - Voyage validé.")
+
+                    # --- NOUVELLE SÉQUENCE SPÉCIFIQUE À L'HDV FORGEMAGE DE BRAKMAR ---
+                    if city_name == "Brakmar":
+                        print("\n🤖 --- DÉBUT SÉQUENCE HDV FORGEMAGE (BRAKMAR) --- 🤖")
+                        time.sleep(2) # Attente après la validation du voyage
+
+                        # 1. Attendre l'arrivée sur la map de l'HDV
+                        if wait_for_image_periodically('images/HDV_BRAK/Forgemage/pos_forgemagie.png', total_timeout=90, check_interval=4, search_duration=1, confidence=0.8):
+                            # 2. Cliquer sur le PNJ de l'HDV
+                            if not find_and_click_image('images/HDV_BRAK/Forgemage/hdv_forgemage.png', timeout=5, confidence=0.9):
+                                print("❌ - Échec : Impossible de trouver le PNJ de l'HDV Forgemage.")
+                                return
+                            time.sleep(1)
+                            # 3. Cliquer sur le filtre des runes
+                            if find_and_click_image('images/HDV_BRAK/Forgemage/filters/rune_forgemagie.png', timeout=5, confidence=0.85):
+                                # 4. Cliquer sur l'item "Ga Pa"
+                                if not find_and_click_image('images/HDV_BRAK/Forgemage/items/ga_pa.png', timeout=5, confidence=0.9):
+                                    print("❌ - Échec : Impossible de trouver l'item 'Ga Pa'.")
+                                    return
+                        print("✅ - Séquence HDV Forgemage terminée.")
+                else:
+                    print("❌ - Le chat a été cliqué, mais le champ de saisie n'est pas apparu.")
+                    return
+            else:
+                print("❌ - Échec de la localisation de la barre de chat pour l'ouvrir.")
+                return
         else:
             print(f"⚠️ - Le personnage n'est pas arrivé en jeu (aucune cité détectée).")
             return # On arrête le script si aucune cité n'est trouvée
