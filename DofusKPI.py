@@ -1,6 +1,7 @@
 # Mon Script DofusKPI - Version GUI Sécurisée
 import subprocess
 import os
+import random
 import pyautogui
 import time
 import pygetwindow as gw
@@ -14,7 +15,8 @@ import traceback # Gardé pour un débogage facile
 DEFAULT_LAUNCHER_PATH = r"C:\Jeux\Ankama\Ankama Launcher\Ankama Launcher.exe"
 ANKAMA_LAUNCHER_WINDOW_TITLE = "Ankama Launcher"
 LOAD_WAIT_TIME = 10 
-DOFUS_WINDOW_TITLE = "Dofus" # Titre de la fenêtre du jeu
+DOFUS_WINDOW_TITLE = "Dofus "
+CHARACTER_NAME = "Sunaldar"  # Remplacez par le nom de votre personnage
 
 # --- VARIABLES GLOBALES ---
 last_position = None
@@ -88,9 +90,11 @@ def wait_and_activate_window(titre_fenetre, timeout=30):
         # On cherche une fenêtre qui COMMENCE PAR le titre donné, pour plus de flexibilité
         matching_window = None
         for window in gw.getAllWindows():
-            if window.title.startswith(titre_fenetre):
+            # NOUVELLE LOGIQUE : On cherche soit le titre de base "Dofus ",
+            # soit un titre qui contient le nom du personnage.
+            if window.title.startswith(titre_fenetre) or CHARACTER_NAME in window.title:
                 matching_window = window
-                break # On a trouvé notre fenêtre, on sort de la boucle
+                break
 
         if matching_window:
             print(f"✅ - Fenêtre '{matching_window.title}' trouvée !")
@@ -101,7 +105,14 @@ def wait_and_activate_window(titre_fenetre, timeout=30):
                 matching_window.restore()
                 time.sleep(0.5)
 
-            matching_window.activate()
+            # Encapsuler activate() pour ignorer les fausses erreurs (code 0 = succès)
+            try:
+                matching_window.activate()
+            except Exception as e:
+                # pygetwindow peut lever une exception même si l'activation a réussi (code 0)
+                # On log mais on continue
+                print(f"⚠️ - Avertissement lors de l'activation (peut être ignoré si succès) : {e}")
+            
             time.sleep(0.5) # Laisse le temps à l'OS de réagir
 
             # Vérification et plan B si l'activation a échoué
@@ -138,7 +149,7 @@ def find_and_click_image(image_path, timeout=20, confidence=0.8):
     print(f"❌ - Timeout : Impossible de trouver l'image '{image_path}' après {timeout}s.")
     return False
 
-def wait_for_image(image_path, timeout=20, confidence=0.8):
+def wait_for_image(image_path, timeout=10, confidence=0.8):
     """
     Recherche une image à l'écran pendant un temps donné et retourne True si elle est trouvée.
     """
@@ -157,6 +168,41 @@ def wait_for_image(image_path, timeout=20, confidence=0.8):
 
     print(f"❌ - Timeout : Impossible de trouver l'image '{image_path}' après {timeout}s.")
     return False
+
+def wait_for_any_image(image_paths, timeout=30, confidence=0.8):
+    """
+    Recherche une image parmi une liste à l'écran et retourne le chemin de la première trouvée.
+    """
+    print(f"🔎 - Recherche de n'importe quelle image parmi : {', '.join(image_paths)}...")
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        for image_path in image_paths:
+            try:
+                # On utilise locateOnScreen qui est un peu plus rapide si on n'a pas besoin du centre
+                if pyautogui.locateOnScreen(image_path, confidence=confidence):
+                    print(f"✅ - Image '{image_path}' trouvée !")
+                    return image_path # On retourne le chemin de l'image trouvée
+            except pyautogui.PyAutoGUIException:
+                # Cette exception peut survenir si l'image n'est pas trouvée, on l'ignore et on réessaie.
+                pass
+        # Petite pause pour ne pas surcharger le CPU
+        time.sleep(0.25)
+
+    print(f"❌ - Timeout : Impossible de trouver une des images après {timeout}s.")
+    return None
+
+def write_with_random_interval(text, min_delay=0.12, max_delay=0.65):
+    """
+    Simule la frappe de texte avec un intervalle aléatoire entre chaque touche
+    pour un comportement plus humain.
+    """
+    print(f"⌨️ - Écriture humaine : '{text}'")
+    for char in text:
+        pyautogui.press(char)
+        # Calcule une pause aléatoire dans la plage spécifiée
+        delay = random.uniform(min_delay, max_delay)
+        time.sleep(delay)
+
 
 # --- FONCTIONS D'ÉCOUTE (PYNPUT) ---
 
@@ -190,75 +236,96 @@ def script_logic(window, values):
     try:
         # --- LOGIQUE DE DÉMARRAGE UNIFIÉE ---
         # On vérifie si le jeu est déjà lancé pour sauter les étapes du launcher
-        dofus_window_exists = any(win.title.startswith(DOFUS_WINDOW_TITLE) for win in gw.getAllWindows())
+        # LOGIQUE AMÉLIORÉE : On cherche une fenêtre qui commence par "Dofus " OU qui contient le nom du personnage.
+        dofus_window_exists = any(
+            win.title.startswith(DOFUS_WINDOW_TITLE) or CHARACTER_NAME in win.title for win in gw.getAllWindows()
+        )
 
-        print("📈 - Démarrage de DofusKPI...")
-        
-        if not start_AnkamaLauncher(values['-LAUNCHER_PATH-']):
-            return
-
-        # On attend que le launcher soit prêt et on l'active
-        if not wait_and_activate_window(ANKAMA_LAUNCHER_WINDOW_TITLE):
-            return
-
-        if not dofus_window_exists:
+        if not dofus_window_exists: # --- SCÉNARIO 1 : LE JEU N'EST PAS LANCÉ ---
+            print("Dofus pas trouvé parmi les fenêtres actives.")
             print("\n🤖 --- DÉBUT DE L'AUTOMATISATION (via Launcher) --- 🤖")
-            # 1. Chercher et cliquer sur le bouton "Jouer" du launcher
-            if not find_and_click_image('images/jouer_launcher.png', confidence=0.8):
-                print("⚠️ - Arrêt du script car le bouton 'Jouer' du launcher n'a pas été trouvé.")
+            # Le jeu n'est pas lancé, on passe par le launcher.
+            if not start_AnkamaLauncher(values['-LAUNCHER_PATH-']):
+                print("⚠️ - Arrêt du script car le lancement de l'Ankama Launcher a échoué.")
                 return
-            # 2. Attendre que la fenêtre Dofus apparaisse et l'activer
+
+            if not wait_and_activate_window(ANKAMA_LAUNCHER_WINDOW_TITLE):
+                return
+            
+            # 1. Vérifier l'état du bouton "Jouer" dans le launcher
+            print("🔎 - Vérification de l'état du launcher (Jouer ou En jeu)...")
+            launcher_state_images = [
+                'images/launcher_jouer.png',
+                'images/launcher_jouer_already_running.png'
+            ]
+            found_launcher_state = wait_for_any_image(launcher_state_images, timeout=20, confidence=0.8)
+
+            if found_launcher_state == 'images/launcher_jouer.png':
+                # Cas 1.1: Le jeu n'est pas lancé, on clique sur "Jouer"
+                print("✅ - Le bouton 'Jouer' est disponible. Lancement du jeu...")
+                pyautogui.click(pyautogui.locateCenterOnScreen(found_launcher_state, confidence=0.8))
+            elif found_launcher_state == 'images/launcher_jouer_already_running.png':
+                # Cas 1.2: Le launcher indique que le jeu est déjà en cours d'exécution
+                print("✅ - Le launcher indique que le jeu est déjà 'En jeu'. Attente de la fenêtre Dofus...")
+            else:
+                # Cas 1.3: Aucun des états attendus n'est trouvé.
+                print("❌ - Impossible de déterminer l'état du launcher. Ni 'Jouer', ni 'En jeu' n'a été trouvé.")
+                return
+
+            # 2. Attendre la fenêtre Dofus, la sélectionner, puis le personnage
             if not wait_and_activate_window(DOFUS_WINDOW_TITLE):
                 return
-        else:
-            print("\n🤖 --- Dofus déjà lancé, activation et poursuite... --- 🤖")
-            wait_and_activate_window(DOFUS_WINDOW_TITLE)
+            if not find_and_click_image('images/dofus_personnage_nom.png', confidence=0.8):
+                return
+            if not find_and_click_image('images/dofus_personnage_jouer.png', confidence=0.8):
+                return
 
-        # 4. Chercher et cliquer sur le bouton du personnage/serveur
-        if not find_and_click_image('images/personnage_jouer.png', confidence=0.8):
-            return
+            print("\n⏳ - Attente de l'arrivée en jeu.")
+            time.sleep(5)  # Pause initiale avant de commencer la recherche 
+            print("\n⏳Recherche de l'image de la cité...")
 
-        # 5. Attendre l'arrivée en jeu en cherchant l'image d'une des cités
-        print("\n⏳ - Attente de l'arrivée en jeu.")
-        time.sleep(5)  # Pause initiale avant de commencer la recherche 
-        print("\n⏳Recherche de l'image de la cité...")
-    
-        city_found = None
-        start_time = time.time()
-        timeout = 60
-        while time.time() - start_time < timeout:
+        else: # --- SCÉNARIO 2 : LE JEU EST DÉJÀ LANCÉ ---
+            print("\n🤖 --- Dofus déjà lancé, reprise du script en jeu... --- 🤖")
+            # Le jeu est déjà lancé, on active juste la fenêtre.
+            if not wait_and_activate_window(DOFUS_WINDOW_TITLE):
+                print("⚠️ - Arrêt : Impossible d'activer la fenêtre Dofus existante.")
+                return
             
-            if wait_for_image('images/bonta.png', confidence=0.7):
-                city_found = 'bonta'
-                break
-            if wait_for_image('images/brakmar.png', confidence=0.7):
-                city_found = 'brakmar'
-                break
-            time.sleep(0.5) # On attend un peu avant de réessayer
+            # On attend un peu pour être sûr que le jeu est prêt à recevoir des commandes
+            print("... Pause pour s'assurer que le jeu est réactif ...")
+            time.sleep(2)
 
-        if city_found == 'bonta':
-            print("✅ - Arrivée en jeu confirmée (Bonta). Passage en mode solo.")
-            pyautogui.press('space')
+        # --- POINT DE CONVERGENCE ---
+        # Que le jeu vienne d'être lancé ou qu'il l'était déjà, on est maintenant en jeu.
+        # On vérifie dans quelle cité on se trouve pour exécuter les bonnes commandes.
+
+        city_images = ['images/dofus_bonta.png', 'images/dofus_brakmar.png']
+        found_city_image = wait_for_any_image(city_images, timeout=60, confidence=0.7)
+
+        if found_city_image == 'images/dofus_bonta.png':
+            print("✅ - Personnage localisé à Bonta. Passage en mode solo et voyage.")
             time.sleep(0.5)
-            pyautogui.write('/solo', interval=0.1)
-            pyautogui.press('enter')
-        elif city_found == 'brakmar':
-            print("✅ - Arrivée en jeu confirmée (Brakmar). Passage en mode solo et voyage.")
             pyautogui.press('space')
-            time.sleep(0.5)
-            pyautogui.write('/solo', interval=0.1)
+            write_with_random_interval('/solo')
             pyautogui.press('enter')
-            time.sleep(0.5) # Pause avant la commande de voyage
-            pyautogui.write('/travel -26,38', interval=0.1)
+            print("✅ - Passage en mode solo.")
+            time.sleep(1)
+            write_with_random_interval('/travel 34,-59')
+            pyautogui.press('enter')
+        elif found_city_image == 'images/dofus_brakmar.png':
+            print("✅ - Personnage localisé à Brakmar. Passage en mode solo et voyage.")
+            time.sleep(2.5)
+            pyautogui.press('space')
+            write_with_random_interval('/solo')
+            pyautogui.press('enter')
+            print("✅ - Passage en mode solo.")
+            time.sleep(1) # Pause avant la commande de voyage
+            write_with_random_interval('/travel -26,38')
             pyautogui.press('enter')
         else:
-            print(f"⚠️ - Le personnage n'est pas arrivé en jeu après {timeout}s.")
+            print(f"⚠️ - Le personnage n'est pas arrivé en jeu (aucune cité détectée).")
             return # On arrête le script si aucune cité n'est trouvée
 
-        # 6. Lancer l'écouteur de la souris pour les étapes suivantes
-        print("\n✅ - Actions automatiques terminées.")
-        start_mouse_listener()        
-        
     except Exception as e:
         print("-" * 50)
         print(f"❌ ERREUR CRITIQUE DANS LE THREAD DE LOGIQUE : {e}")
@@ -281,7 +348,7 @@ def main():
         [sg.Button('Démarrer DofusKPI', key='-DEMARRER-', size=(25, 2), button_color=('white', 'green'), visible=bool(DEFAULT_LAUNCHER_PATH))],
         [sg.Text('Console de log :')],
         [sg.Multiline(size=(80, 20), key='-LOG-', autoscroll=True, font=('Consolas', 10), expand_x=True, expand_y=True, disabled=True)],
-        [sg.Button('STOP (Arrêt)', key='-STOP-', size=(20, 1), button_color=('white', 'firebrick3'), disabled=True), sg.Exit()]
+        [sg.Button('Redémarrer', key='-RESTART-', size=(20, 1), button_color=('white', 'orange red'), disabled=True), sg.Exit()]
     ]
     
     # --- Calcul de la position de la fenêtre ---
@@ -292,7 +359,7 @@ def main():
     # On calcule la position X pour que la fenêtre soit à droite
     location_x = screen_width - window_width
     
-    window = sg.Window('DofusKPI v0.1', layout, finalize=True, resizable=True, location=(location_x, 50))
+    window = sg.Window('DofusKPI v0.1', layout, finalize=True, resizable=True, location=(location_x, 30))
 
     # Redirection de la sortie standard (print) vers la fenêtre
     redir = StreamToGUI(window)
@@ -310,9 +377,7 @@ def main():
         '<ctrl>+<alt>+s': on_hotkey_stop
     })
     hotkey_listener.start()
-    print("ℹ️  Raccourci d'arrêt du script : Ctrl+Alt+C")
-
-    # NOTE : On ne lance PLUS le thread ici automatiquement !
+    print("ℹ️  Raccourci d'arrêt d'urgence : Ctrl+Alt+S")
 
     global GUI_ACTIVE
     while True:
@@ -333,7 +398,7 @@ def main():
             script_started = True
             # Mise à jour de l'interface
             window['-DEMARRER-'].update(disabled=True, text="En cours d'exécution...")
-            window['-STOP-'].update(disabled=False)
+            window['-RESTART-'].update(disabled=False)
             # On cache les éléments liés au chemin
             window['-PATH_TEXT-'].update(visible=False)
             window['-LAUNCHER_PATH-'].update(visible=False)
@@ -352,12 +417,33 @@ def main():
             window['-LOG-'].update(text_to_append, append=True)
             window['-LOG-'].Widget.see("end")
         
-        if event == '-STOP-' or event == '-HOTKEY_STOP-':
-            if event == '-HOTKEY_STOP-':
-                print("\n🛑 Signal d'arrêt d'urgence (raccourci clavier) détecté. Arrêt du script...")
-            else:
-                print("\n🛑 Signal d'arrêt (bouton STOP) détecté. Arrêt du script...")
+        if event == '-HOTKEY_STOP-':
+            print("\n🛑 Signal d'arrêt d'urgence (raccourci clavier) détecté. Arrêt du script...")
             break
+
+        if event == '-RESTART-':
+            if event == '-HOTKEY_STOP-':
+                print("\n🛑 Signal d'arrêt d'urgence (raccourci clavier) détecté. Redémarrage du script...")
+            else:
+                print("\n🔄 Redémarrage du script demandé par l'utilisateur...")
+            
+            # Logique de redémarrage propre
+            try:
+                # Arrête les écouteurs proprement
+                GUI_ACTIVE = False
+                hotkey_listener.stop()
+                if mouse_listener and mouse_listener.is_alive():
+                    mouse_listener.stop()
+                
+                # Restaure la console avant de relancer
+                sys.stdout = sys.__stdout__
+                sys.stderr = sys.__stderr__
+                
+                # Remplace le processus actuel par un nouveau
+                os.execv(sys.executable, ['python'] + sys.argv)
+            except Exception as e:
+                print(f"❌ Erreur lors de la tentative de redémarrage : {e}")
+                break # Sortir si le redémarrage échoue
             
     # --- Logique d'arrêt propre ---
     GUI_ACTIVE = False
